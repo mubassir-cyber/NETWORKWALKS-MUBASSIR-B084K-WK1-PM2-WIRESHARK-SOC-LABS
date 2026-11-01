@@ -1,168 +1,158 @@
-# Wireshark SOC Labs: Network Traffic Analysis
+Wireshark SOC Labs: Week 1 Extra Project
 
-Hands-on SOC analyst practice with Wireshark: finding attackers, reading plain-text traffic, spotting brute force and investigating a scam call.
+Networkwalks Cybersecurity Internship · Batch B084 · Week 1 · PM4 (Wireshark, Extra) Author: Mubassir
 
-> **Environment:** All work was done inside the provided Networkwalks virtual labs (Week 1 Extra Project, Batch B084). No real networks were tested or captured.
+I played the role of a SOC analyst and investigated 6 packet captures in the Networkwalks browser labs. Each lab has 10 tasks. I used Wireshark display filters, Statistics, Follow TCP Stream and the Telephony tools to find an attacker, hidden data, plain-text passwords, a brute-force attack and a scam call.
 
-![Skill](https://img.shields.io/badge/Skill-Wireshark-blue) ![Skill](https://img.shields.io/badge/Skill-SOC%20Analysis-red) ![NetworkWalks](https://img.shields.io/badge/Networkwalks-B084-black)
+Safe-use note: All work was done inside the provided lab environment. No real network was captured or tested. Passwords and codes found in the labs are masked in the screenshots and not written in this README.
 
----
+Summary
+Lab	Topic	What I found	Score
+3	Identify the Attacker's IP	TCP SYN port scan of a web server	90/100
+4	Follow TCP Stream 1	Passwords shared in a plain-text office chat	80/100
+5	Follow TCP Stream, Part 2	Secret note hidden in an HTML comment	100/100
+6	HTTP Plain Text Credentials	Login sent over HTTP, readable in packets	100/100
+7	Catch the Brute Force Attacker	FTP password guessing, 24 failures then 1 success	100/100
+8	Catch the Call Scammer	SIP/RTP scam call that asked for card details	100/100
 
-## Project Overview
+(Lab numbers match the Networkwalks lab links, wireshark-lab3 to wireshark-lab8.)
 
-I investigated 6 live labs. Each lab gave a packet capture and 10 tasks. The goal was to use Wireshark display filters, Statistics, and Follow TCP Stream to answer SOC-style questions.
+Filters used across the labs
+Goal	Display filter
+Packets with the SYN flag set	tcp.flags.syn == 1
+One host's traffic	ip.addr == <ip>
+One TCP port	tcp.port == <port>
+All web requests and responses	http
+Form submissions (logins)	http.request.method == "POST"
+Failed FTP logins	ftp.response.code == 530
+Successful FTP logins	ftp.response.code == 230
+VoIP call setup	sip.Method == "INVITE"
+Voice packets	rtp
+Lab 3: Identify the Attacker's IP
 
-| # | Lab | Focus | Result |
-|---|-----|-------|--------|
-| 1 | Identify the Attacker's IP | SYN scan / port scan | 100/100 |
-| 2 | Follow TCP Stream 1 | Plain-text office chat | 80/100 |
-| 3 | Follow TCP Stream, Part 2 | Hidden data in HTTP pages | 100/100 |
-| 4 | HTTP Plain Text Credentials | Credentials sent over HTTP | 100/100 |
-| 5 | Catch the Brute Force Attacker | Repeated login attempts | 100/100 |
-| 6 | Catch the Call Scammer | VoIP / SIP / RTP call replay | 100/100 |
+Scenario: A staff member reported unusual traffic to the company web server.
 
-*(Update the Result column with your final scores.)*
+Method
 
----
+Captured the traffic (309 packets).
+Applied tcp.flags.syn == 1 (73 packets displayed) and scrolled the Source column. One host sent a long block of SYN packets from about 3.4 s onward.
+Filtered that host with ip.addr == 192.168.10.66. It first sent an ICMP ping to the server, then started the scan.
+Read the Info column. The source port stayed the same (52311) while the destination port changed in every packet.
+Open ports answered with SYN, ACK. Closed ports answered with RST, ACK.
 
-## Lab 1: Identify the Attacker's IP
+Findings
 
-**Scenario:** Find the machine scanning the network.
+Attacker: 192.168.10.66, target (web server): 192.168.10.20
+Ports probed: 40. Open: 22, 80, 443. Closed: 37.
+Attack type: TCP SYN port scan (reconnaissance, MITRE ATT&CK T1046).
 
-**Key filters used**
-```
-tcp.flags.syn == 1 && tcp.flags.ack == 0      # only packets that start a TCP connection
-ip.src == <attacker> && tcp.flags.syn == 1    # SYNs from the suspect
-ip.src == <target> && tcp.flags.syn == 1 && tcp.flags.ack == 1   # open ports (SYN, ACK)
-ip.src == <target> && tcp.flags.reset == 1    # closed ports (RST, ACK)
-```
+SYN filter Attacker traffic
 
-**Method**
-1. Filtered for SYN-only packets.
-2. Used **Statistics > Conversations > IPv4** to find the IP sending the long block of SYNs.
-3. Checked the Info column: one source port stayed constant while the destination port changed.
-4. Open ports answered with `SYN, ACK`; closed ports answered with `RST, ACK`.
+Defence: Firewall rules and an IDS that alerts on many SYNs from one source in a short time.
 
-**Findings**
-- Attack type: **TCP SYN port scan** (reconnaissance, MITRE T1046)
-- Attacker IP: `<lab IP>`
-- Target IP: `<lab IP>`
-- Open ports: `<ports>`
-- Closed ports: `<count>`
+Lab 4: Follow TCP Stream 1
 
-![Screenshot](screenshots/lab1.png)
+Scenario: Staff use an old chat tool. Find the chat and read it.
 
----
+Method
 
-## Lab 2: Follow TCP Stream 1
+Opened Statistics → Conversations → TCP and ignored ports 80 and 443. One conversation used port 5000.
+Applied tcp.port == 5000 (24 packets). The first SYN came from 192.168.10.45, so that host started the chat.
+Right-click a data packet → Follow → TCP Stream. The window title showed tcp.stream eq 5 and the conversation size was 413 bytes.
 
-**Scenario:** Staff use an old office chat tool that sends messages in plain text.
+Findings
 
-**Method**
-1. **Statistics > Conversations > TCP** to find the one non-web port (not 80/443).
-2. `tcp.port == <port>` and checked the first SYN to see who started the chat.
-3. Right-click a data packet > **Follow > TCP Stream** to read the conversation.
+Chat port 5000, stream 5, 413 bytes.
+Client text is red and server text is blue.
+An IT person sent a temporary password and the guest Wi-Fi password in clear text (masked in the screenshot).
 
-**Findings**
-- Chat port: `<port>`
-- Client started the chat; client text is **red**, server text is **blue**
-- Sensitive data (passwords) was readable in plain text: `[redacted]`
+Chat port Follow TCP stream
 
-**Lesson:** Use encrypted tools (TLS/HTTPS). Never send passwords in clear text.
+Defence: Use an encrypted chat tool (TLS), and never send passwords in chat.
 
-![Screenshot](screenshots/lab2.png)
+Lab 5: Follow TCP Stream, Part 2
 
----
+Scenario: An admin said one intranet page has a hidden note.
 
-## Lab 3: Follow TCP Stream, Part 2
+Method
 
-**Scenario:** An admin says one intranet page has a hidden note.
+Applied http and listed the pages one staff PC requested.
+Compared response sizes. /staff.html was the largest, so I followed its stream (stream 7).
+The note was inside an HTML comment (<!-- ... -->). Browsers do not show comments, but they travel in the packet.
 
-**Key filters used**
-```
-http.request.method == "GET"
-ip.addr == <staff PC> && http
-```
+Findings
 
-**Method**
-1. Listed the pages the staff PC requested.
-2. Followed each response with **Follow > HTTP Stream**.
-3. Found the hidden text inside an **HTML comment** (`<!-- ... -->`). Browsers do not show comments, but they are visible in the packet bytes.
+Hidden in /staff.html, status code 200, server to client.
+The comment exposed a backup server address and an access code (masked in the screenshot).
+The same PC also downloaded report.txt, and Follow TCP Stream showed its contents.
 
-**Findings:** `<page name>`, `<what was hidden>`
+HTTP requests Hidden comment
 
-![Screenshot](screenshots/lab3.png)
+Defence: Never leave notes or secrets in page source. Remove comments before publishing.
 
----
+Lab 6: HTTP Plain Text Credentials
 
-## Lab 4: HTTP Plain Text Credentials
+Scenario: Find usernames and passwords sent in clear text.
 
-**Key filters used**
-```
-http.request.method == "POST"
-```
+Method
 
-**Method:** Filtered for POST requests, opened the login request, and read the form fields in the packet details (HTML Form URL Encoded).
+Captured 255 packets. The protocol was HTTP.
+Applied http.request.method == "POST" and found 2 login requests to /login from 192.168.10.45.
+In the packet details, the HTML Form URL Encoded line showed the username and password.
+Follow → TCP Stream (stream 4) showed both attempts: the first failed ("Invalid username or password") and the second succeeded ("Welcome back").
 
-**Findings:** Login page `<page>`, number of attempts `<n>`, credentials `[redacted]`
+Findings: Credentials for one user travelled unencrypted. Anyone on the network could read them.
 
-**Lesson:** Login forms must use HTTPS.
+POST requests Login stream
 
-![Screenshot](screenshots/lab4.png)
+Defence: Use HTTPS for every login page.
 
----
+Lab 7: Catch the Brute Force Attacker
 
-## Lab 5: Catch the Brute Force Attacker
+Scenario: Find who is guessing passwords.
 
-**Method:** Looked for one source sending many login attempts to the same service, counted failures, and found the one success.
+Method
 
-**Findings:** Protocol `<protocol>`, attacker `<lab IP>`, target `<lab IP>`, failed logins `<n>`, failure code `<code>`, success code `<code>`
+Captured 369 packets. The repeated logins were FTP to 192.168.10.20.
+ftp.response.code == 530 showed 24 "Login incorrect" replies, all to 192.168.10.66.
+ftp.response.code == 230 showed exactly one "Login successful" at frame 284, to the same host.
+The attacker kept trying passwords for the admin account until one worked.
 
-**Lesson:** Use account lockout, rate limiting, MFA and strong passwords.
+Findings: Attacker 192.168.10.66, 24 failed logins, then a success. Attack type: brute force.
 
-![Screenshot](screenshots/lab5.png)
+Failed logins Successful login
 
----
+Defence: Account lockout, rate limiting, strong passwords, MFA, and SFTP instead of FTP.
 
-## Lab 6: Catch the Call Scammer
+Lab 8: Catch the Call Scammer
 
-**Key filters used**
-```
-sip
-rtp
-```
+Scenario: Investigate a phone call, play it back and identify the scammer.
 
-**Method:** Used **Telephony > VoIP Calls** to find the call, read the SIP INVITE for caller details and codec, and played the call with **Play Streams**.
+Method
 
-**Findings:** Setup protocol SIP, voice protocol RTP, codec `<codec>`, scam type `<type>`
+Captured 1051 packets. Call setup used SIP and the voice used RTP.
+sip.Method == "INVITE" showed the call from 192.168.10.45 to extension 202 on 192.168.10.52 (UDP 5060). The SIP header gave the caller's extension and name.
+rtp showed 804 voice packets in two directions (two SSRC values). The codec was G.711 PCMU.
+Telephony → VoIP Calls → Play Streams let me hear who answered and the card details the scammer asked for (not written here).
 
-**Lesson:** Never share card numbers or codes by phone. Verify callers through official channels.
+SIP INVITE RTP voice packets
 
-![Screenshot](screenshots/lab6.png)
+Defence: Encrypt calls with SRTP and train staff never to give card details by phone.
 
----
+Troubleshooting experience
 
-## Troubleshooting Experience
+Problem 1: filter errors when searching packet contents. In Lab 5 I tried to search the HTTP responses for the hidden note with filters like frame contains "<!--" and got the error "frame is a protocol, not a field". Other variants were also rejected.
 
-**Problem:** I tried to search packet contents with `frame contains "<!--"` and got the error *"frame is a protocol, not a field: it cannot be compared with a value."* Other variants also failed.
+Solution: I stopped fighting the filter bar and used other Wireshark tools:
 
-**Solution:** I stopped fighting the filter and used Wireshark's other tools instead:
-1. Followed each page's response with **Follow > HTTP Stream** and read the content.
-2. Used **Ctrl+F** with **Packet bytes** and **String** to search for `<!--`.
-3. Compared response sizes in the packet list. The page with the hidden note was larger than the others.
+Compared response sizes in the packet list. The page with the hidden note was the largest.
+Opened that response with Follow → TCP Stream and read the page.
+Used Ctrl+F with Packet bytes and String to search for <!--.
 
-**Lesson:** Display-filter syntax differs between Wireshark versions. If a filter is rejected, use Find (Ctrl+F), Follow Stream, or Export Objects.
+Problem 2: wrong answer on "Show only SYN packets" (Lab 3). I used tcp.flags.syn == 1 && tcp.flags.ack == 0. That shows only connection starts (the scan's 40 SYNs plus other hosts), but the lab counts every packet with the SYN flag set, including SYN, ACK replies, which is 73. The simple filter tcp.flags.syn == 1 gave the right number.
 
----
+Lesson: Read the question exactly, and match the filter to the wording. If a filter is rejected or the count looks off, check the flags, the field name and the Wireshark version, and fall back on Follow Stream, Find and Statistics.
 
-## Skills Practised
-Wireshark display filters, Statistics (Conversations/Endpoints), Follow TCP/HTTP Stream, port-scan detection, plain-text credential analysis, brute-force detection, VoIP analysis.
+Skills practised
 
-## Tools
-Wireshark, Networkwalks browser labs
-
----
-
-**Author:** Mubassir
-**Program:** Networkwalks Cybersecurity Internship (Batch B084), Week 1 Extra Project
-**Instructor:** Waqas Karim CCIE
+Wireshark display filters, Statistics (Conversations), Follow TCP/HTTP stream, SYN scan detection, plain-text credential analysis, brute-force detection, VoIP (SIP/RTP) analysis, writing security recommendations.
